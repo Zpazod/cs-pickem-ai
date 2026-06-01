@@ -11,7 +11,9 @@ from backend.database.session import SessionLocal, init_db as create_tables
 from backend.ingestion.hltv_downloader import download_match_page
 from backend.ingestion.hltv_parser import parse_match_html_file
 from backend.ingestion.importer import import_parsed_match
+from backend.ingestion.ranking_importer import import_rankings_file
 from backend.models.elo import EloSystem
+from backend.models.team_strength import TeamStrengthModel
 from backend.pickem.optimizer import DiamondCoinOptimizer
 from backend.simulation.swiss import SwissMonteCarlo
 
@@ -52,12 +54,23 @@ def rebuild_elo() -> None:
     typer.echo(f"Rebuilt Elo for {len(ratings)} teams.")
 
 
+@app.command("import-rankings")
+def import_rankings(path: Path) -> None:
+    create_tables()
+    with SessionLocal() as session:
+        result = import_rankings_file(session, path)
+    typer.echo(f"Imported rankings: {result.inserted} inserted, {result.updated} updated.")
+
+
 @app.command("predict")
-def predict(team1: str, team2: str, bo3: bool = False) -> None:
+def predict(team1: str, team2: str, bo3: bool = False, elo_only: bool = False) -> None:
     create_tables()
     with SessionLocal() as session:
         EloSystem().rebuild_from_matches(session)
-        prediction = EloSystem().predict(session, team1, team2, bo3=bo3)
+        if elo_only:
+            prediction = EloSystem().predict(session, team1, team2, bo3=bo3)
+        else:
+            prediction = TeamStrengthModel().predict(session, team1, team2, bo3=bo3)
     typer.echo(json.dumps(prediction.__dict__, indent=2))
 
 
@@ -94,15 +107,14 @@ def simulate_swiss(teams_json: Path, sims: int = 10000) -> None:
         raise typer.BadParameter("teams_json must contain a JSON list of team names.")
     with SessionLocal() as session:
         EloSystem().rebuild_from_matches(session)
-        rating_rows = session.execute(select(Team, TeamRating).join(TeamRating, Team.id == TeamRating.team_id)).all()
-        ratings_by_team = {team.name: rating.rating for team, rating in rating_rows}
-        elo = EloSystem()
+        strength_model = TeamStrengthModel()
+        strengths_by_team = {
+            team: strength_model.strength_for_team_name(session, team).final_strength for team in teams
+        }
 
         def win_probability(team_a: str, team_b: str, is_bo3: bool) -> float:
-            rating_a = ratings_by_team.get(team_a, elo.base_rating)
-            rating_b = ratings_by_team.get(team_b, elo.base_rating)
-            probability = elo.expected_score(rating_a, rating_b)
-            return elo.bo3_probability(probability) if is_bo3 else probability
+            probability = strength_model.elo.expected_score(strengths_by_team[team_a], strengths_by_team[team_b])
+            return strength_model.elo.bo3_probability(probability) if is_bo3 else probability
 
         probs = SwissMonteCarlo(teams, win_probability, n_sims=sims).simulate_all()
         picks = DiamondCoinOptimizer(probs, teams).optimize()
@@ -147,3 +159,14 @@ def ratings() -> None:
         rows = session.execute(select(Team, TeamRating).join(TeamRating, Team.id == TeamRating.team_id)).all()
         payload = [{"team": team.name, "rating": rating.rating, "context": rating.context} for team, rating in rows]
     typer.echo(json.dumps(sorted(payload, key=lambda row: row["rating"], reverse=True), indent=2))
+
+
+@app.command("strengths")
+def strengths() -> None:
+    create_tables()
+    with SessionLocal() as session:
+        EloSystem().rebuild_from_matches(session)
+        teams = session.scalars(select(Team).order_by(Team.name)).all()
+        model = TeamStrengthModel()
+        payload = [model.strength_for_team(session, team).__dict__ for team in teams]
+    typer.echo(json.dumps(sorted(payload, key=lambda row: row["final_strength"], reverse=True), indent=2))

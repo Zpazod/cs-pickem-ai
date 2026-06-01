@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.database.models import Match, Team
 from backend.database.session import SessionLocal, init_db
 from backend.models.elo import EloSystem
+from backend.models.team_strength import TeamStrengthModel
 
 app = FastAPI(title="CS2 Pick'Em AI MVP")
 
@@ -61,8 +62,7 @@ def team_history(team_name: str, session: Session = Depends(get_session)) -> lis
 def predict_match(team1: str, team2: str, bo3: bool = False, session: Session = Depends(get_session)) -> dict[str, object]:
     try:
         EloSystem().rebuild_from_matches(session)
-        prediction = EloSystem().predict(session, team1, team2, bo3=bo3)
+        prediction = TeamStrengthModel().predict(session, team1, team2, bo3=bo3)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return prediction.__dict__
-

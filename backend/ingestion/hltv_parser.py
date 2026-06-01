@@ -145,6 +145,7 @@ def _extract_player_stats(node, teams: list[str]) -> list[ParsedPlayerMapStat]:
                 ParsedPlayerMapStat(
                     player=player,
                     team=_team_for_row(row, teams, current_team),
+                    side="both",
                     kills=kills,
                     deaths=deaths,
                     assists=assists,
@@ -176,12 +177,14 @@ def _extract_hltv_total_stats(node, teams: list[str]) -> list[ParsedPlayerMapSta
                 ParsedPlayerMapStat(
                     player=player,
                     team=team,
+                    side="both",
                     kills=kills,
                     deaths=deaths,
                     assists=None,
                     adr=_cell_float(row, ".adr.traditional-data"),
                     kast=_cell_float(row, ".kast.traditional-data"),
                     rating_2=_cell_float(row, ".rating"),
+                    swing=_cell_float(row, ".roundSwing"),
                 )
             )
     return stats
