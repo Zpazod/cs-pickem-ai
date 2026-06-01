@@ -170,3 +170,52 @@ def strengths() -> None:
         model = TeamStrengthModel()
         payload = [model.strength_for_team(session, team).__dict__ for team in teams]
     typer.echo(json.dumps(sorted(payload, key=lambda row: row["final_strength"], reverse=True), indent=2))
+
+
+@app.command("sync")
+def sync(raw_dir: Path | None = typer.Option(None, help="Folder containing hltv_match_*.html files."),
+) -> None:
+    """Import new match HTML files, rebuild Elo, detect roster changes."""
+    result = run_sync(raw_dir=raw_dir)
+    typer.echo(result.summary())
+    if result.errors:
+        typer.echo("\nErrors encountered:")
+        for err in result.errors:
+            typer.echo(f"  • {err}")
+
+
+@app.command("team-form")
+def team_form(
+    team: str,
+    window: str = typer.Option("90d", help="Window: 30d | 90d | 180d | all"),
+) -> None:
+    """Show recent form statistics for a team."""
+    if window not in WINDOWS:
+        raise typer.BadParameter(f"window must be one of: {', '.join(WINDOWS)}")
+    create_tables()
+    window_days = WINDOWS[window]
+    with SessionLocal() as session:
+        team_row = session.scalar(select(Team).where(Team.name == team))
+        if not team_row:
+            raise typer.BadParameter(f"Unknown team: {team}")
+        form = compute_team_form(session, team_row, window_days)
+    typer.echo(json.dumps(form.__dict__, indent=2))
+
+    
+
+@app.command("player-form")
+def player_form(
+    player: str,
+    window: str = typer.Option("90d", help="Window: 30d | 90d | 180d | all"),
+) -> None:
+    """Show recent form statistics for a player."""
+    if window not in WINDOWS:
+        raise typer.BadParameter(f"window must be one of: {', '.join(WINDOWS)}")
+    create_tables()
+    window_days = WINDOWS[window]
+    with SessionLocal() as session:
+        player_row = session.scalar(select(Player).where(Player.nickname == player))
+        if not player_row:
+            raise typer.BadParameter(f"Unknown player: {player}")
+        form = compute_player_form(session, player_row, window_days)
+    typer.echo(json.dumps(form.__dict__, indent=2))
