@@ -19,6 +19,9 @@ dependencies = [
 dev = [
     "pytest>=8.2.0",
 ]
+browser = [
+    "playwright>=1.48.0",
+]
 
 [project.scripts]
 cs2-pickem = "backend.cli:app"

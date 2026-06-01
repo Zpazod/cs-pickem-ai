@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from backend.database.models import MapPlayed, Match, Player, PlayerMapStat, Team, TeamRating
 from backend.database.session import SessionLocal, init_db as create_tables
+from backend.ingestion.hltv_downloader import download_match_page
 from backend.ingestion.hltv_parser import parse_match_html_file
 from backend.ingestion.importer import import_parsed_match
 from backend.models.elo import EloSystem
@@ -29,6 +30,17 @@ def import_match(path: Path, source_url: str | None = None) -> None:
     parsed = parse_match_html_file(path, source_url=source_url)
     with SessionLocal() as session:
         match = import_parsed_match(session, parsed)
+    typer.echo(f"Imported match #{match.id}: {parsed.team1} vs {parsed.team2}")
+
+
+@app.command("import-match-url")
+def import_match_url(url: str) -> None:
+    create_tables()
+    downloaded = download_match_page(url)
+    parsed = parse_match_html_file(downloaded.path, source_url=url)
+    with SessionLocal() as session:
+        match = import_parsed_match(session, parsed)
+    typer.echo(f"Saved raw page to {downloaded.path}")
     typer.echo(f"Imported match #{match.id}: {parsed.team1} vs {parsed.team2}")
 
 
