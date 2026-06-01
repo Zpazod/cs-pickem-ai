@@ -1,0 +1,31 @@
+[project]
+name = "cs2-pickem-ai"
+version = "0.1.0"
+description = "Local CS2 Pick'Em MVP with HLTV ingestion, Elo predictions, Swiss simulation, and Pick'Em optimization."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.12.3",
+    "fastapi>=0.115.0",
+    "pandas>=2.2.0",
+    "pydantic>=2.8.0",
+    "requests>=2.32.0",
+    "sqlalchemy>=2.0.30",
+    "typer>=0.12.3",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+]
+
+[project.scripts]
+cs2-pickem = "backend.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
