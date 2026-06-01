@@ -45,9 +45,13 @@ def import_parsed_match(session: Session, parsed: ParsedMatch) -> Match:
         )
         session.add(map_played)
         session.flush()
+        imported_players: set[int] = set()
         for stat in parsed_map.player_stats:
             team = _get_or_create_team(session, stat.team)
             player = _get_or_create_player(session, stat.player, team)
+            if player.id in imported_players:
+                continue
+            imported_players.add(player.id)
             session.add(
                 PlayerMapStat(
                     map_played=map_played,
@@ -103,4 +107,3 @@ def _team_by_name(session: Session, name: str | None) -> Team | None:
     if not name:
         return None
     return session.scalar(select(Team).where(Team.name == name))
-

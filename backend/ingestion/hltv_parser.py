@@ -75,7 +75,7 @@ def _extract_match_score(soup: BeautifulSoup) -> tuple[int | None, int | None]:
 
 def _extract_maps(soup: BeautifulSoup, teams: list[str]) -> list[ParsedMap]:
     maps: list[ParsedMap] = []
-    map_nodes = soup.select(".mapholder, [data-map-name], .stats-content")
+    map_nodes = [node for node in soup.select(".mapholder, [data-map-name]") if "stats-content" not in node.get("class", [])]
     for index, node in enumerate(map_nodes, start=1):
         map_name = node.get("data-map-name") or _first_text(node, [".mapname", ".map-name", ".dynamic-map-name"])
         if not map_name:
@@ -88,6 +88,7 @@ def _extract_maps(soup: BeautifulSoup, teams: list[str]) -> list[ParsedMap]:
         team1_score = scores[0] if len(scores) >= 1 else None
         team2_score = scores[1] if len(scores) >= 2 else None
         winner = _winner_from_score(teams[0], teams[1], team1_score, team2_score)
+        stats_node = _stats_content_for_map(soup, node)
 
         maps.append(
             ParsedMap(
@@ -96,7 +97,7 @@ def _extract_maps(soup: BeautifulSoup, teams: list[str]) -> list[ParsedMap]:
                 team1_score=team1_score,
                 team2_score=team2_score,
                 winner=winner,
-                player_stats=_extract_player_stats(node, teams),
+                player_stats=_extract_player_stats(stats_node or node, teams),
             )
         )
 
@@ -105,7 +106,22 @@ def _extract_maps(soup: BeautifulSoup, teams: list[str]) -> list[ParsedMap]:
     return maps
 
 
+def _stats_content_for_map(soup: BeautifulSoup, map_node) -> object | None:
+    stats_link = map_node.select_one("a.results-stats[href*='mapstatsid']")
+    if not stats_link:
+        return None
+    match = re.search(r"/mapstatsid/(\d+)/", stats_link.get("href", ""))
+    if not match:
+        return None
+    content_id = f"{match.group(1)}-content"
+    return soup.find(class_="stats-content", id=content_id)
+
+
 def _extract_player_stats(node, teams: list[str]) -> list[ParsedPlayerMapStat]:
+    hltv_stats = _extract_hltv_total_stats(node, teams)
+    if hltv_stats:
+        return hltv_stats
+
     stats: list[ParsedPlayerMapStat] = []
     current_team = teams[0] if teams else "Unknown"
     for table in node.select("table"):
@@ -121,8 +137,8 @@ def _extract_player_stats(node, teams: list[str]) -> list[ParsedPlayerMapStat]:
             cells = [cell.get_text(" ", strip=True) for cell in row.select("td")]
             if len(cells) < 2:
                 continue
-            player = cells[0].split()[0]
-            if not player or player.lower() in {"player", "team"}:
+            player = _player_name_from_row(row) or cells[0].split()[0]
+            if not player or player.lower() in {"player", "team", current_team.lower()} or player in teams:
                 continue
             kills, deaths, assists = _extract_kda(cells)
             stats.append(
@@ -138,6 +154,66 @@ def _extract_player_stats(node, teams: list[str]) -> list[ParsedPlayerMapStat]:
                 )
             )
     return stats
+
+
+def _extract_hltv_total_stats(node, teams: list[str]) -> list[ParsedPlayerMapStat]:
+    stats: list[ParsedPlayerMapStat] = []
+    seen: set[tuple[str, str]] = set()
+    for table in node.select("table.totalstats"):
+        team = _first_text(table, [".header-row .teamName.team", ".header-row .teamName"]) or (teams[0] if teams else "Unknown")
+        for row in table.select("tr"):
+            if "header-row" in row.get("class", []):
+                continue
+            player = _player_name_from_row(row)
+            if not player:
+                continue
+            key = (team, player)
+            if key in seen:
+                continue
+            seen.add(key)
+            kills, deaths = _extract_kd_from_row(row)
+            stats.append(
+                ParsedPlayerMapStat(
+                    player=player,
+                    team=team,
+                    kills=kills,
+                    deaths=deaths,
+                    assists=None,
+                    adr=_cell_float(row, ".adr.traditional-data"),
+                    kast=_cell_float(row, ".kast.traditional-data"),
+                    rating_2=_cell_float(row, ".rating"),
+                )
+            )
+    return stats
+
+
+def _player_name_from_row(row) -> str | None:
+    nick = row.select_one(".player-nick")
+    if nick:
+        text = nick.get_text(" ", strip=True)
+        if text:
+            return text
+    smartphone_name = row.select_one(".smartphone-only.statsPlayerName")
+    if smartphone_name:
+        text = smartphone_name.get_text(" ", strip=True)
+        if text:
+            return text
+    return None
+
+
+def _extract_kd_from_row(row) -> tuple[int | None, int | None]:
+    kd_cell = row.select_one(".kd.traditional-data")
+    if not kd_cell:
+        return None, None
+    match = re.search(r"\b(\d+)\s*[-/]\s*(\d+)\b", kd_cell.get_text(" ", strip=True))
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _cell_float(row, selector: str) -> float | None:
+    cell = row.select_one(selector)
+    return _to_float(cell.get_text(" ", strip=True)) if cell else None
 
 
 def _extract_kda(cells: list[str]) -> tuple[int | None, int | None, int | None]:
@@ -222,4 +298,3 @@ def _to_float(text: str | None) -> float | None:
         return None
     match = re.search(r"-?\d+(?:[.,]\d+)?", str(text))
     return float(match.group(0).replace(",", ".")) if match else None
-
