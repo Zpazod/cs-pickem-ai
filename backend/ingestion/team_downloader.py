@@ -27,6 +27,8 @@ def _absolute_match_url(href: str) -> str:
 
 def _collect_match_links_from_team_page(html: str, team_name: str | None = None, days: int | None = None) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days + 1) if days is not None else None
     normalized_team = team_name.strip().lower() if team_name else None
 
     seen = set()
@@ -35,9 +37,18 @@ def _collect_match_links_from_team_page(html: str, team_name: str | None = None,
         href = a["href"].split("#")[0]
         if not re.search(r"/matches/\d+", href) or href.endswith("/stats"):
             continue
-        
-        # Skip if marked as future/upcoming/TBD
+
         if _is_future_or_upcoming_match(a):
+            continue
+
+        match_date = _extract_match_link_date(a)
+        if match_date is not None:
+            if match_date > now:
+                continue
+            if cutoff is not None and match_date < cutoff:
+                continue
+
+        if normalized_team and not _node_contains_team(a, normalized_team):
             continue
 
         url = _absolute_match_url(href)
@@ -59,6 +70,16 @@ def _extract_match_link_date(node) -> datetime | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _node_contains_team(node, normalized_team: str) -> bool:
+    text = node.get_text(" ", strip=True).lower()
+    if normalized_team in text:
+        return True
+    for candidate in list(node.parents)[:4]:
+        if normalized_team in candidate.get_text(" ", strip=True).lower():
+            return True
+    return False
 
 
 def _extract_hltv_match_id(url: str) -> int | None:

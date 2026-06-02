@@ -210,14 +210,14 @@ def team_form(
 
 @app.command("download-team-matches")
 def cli_download_team_matches(
-    team: str,
+    team: str = typer.Argument(help="Format : 'Team Name' "),
     window: str = typer.Argument("90d", help="Window: 30d | 90d | 180d | all or number of days"),
     max_matches: int | None = typer.Option(None, help="Maximum number of matches to download."),
 ) -> None:
     """Download recent HLTV match pages for a team into the raw data folder."""
-    # allow numeric shorthand
+    # allow numeric shorthand (90 -> 90d)
     if window.isdigit():
-        window = f"{window}"
+        window = f"{window}d"
 
     def progress(processed: int, total: int, downloaded: int) -> None:
         percent = (processed / total * 100) if total else 0.0
