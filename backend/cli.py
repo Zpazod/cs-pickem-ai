@@ -16,6 +16,9 @@ from backend.models.elo import EloSystem
 from backend.models.team_strength import TeamStrengthModel
 from backend.pickem.optimizer import DiamondCoinOptimizer
 from backend.simulation.swiss import SwissMonteCarlo
+from backend.models.recent_form import WINDOWS, compute_team_form, compute_player_form
+from backend.ingestion.team_downloader import _resolve_team_results_url, download_team_matches
+from backend.ingestion.sync import run_sync
 
 app = typer.Typer(help="CS2 Pick'Em AI MVP CLI")
 
@@ -187,9 +190,12 @@ def sync(raw_dir: Path | None = typer.Option(None, help="Folder containing hltv_
 @app.command("team-form")
 def team_form(
     team: str,
-    window: str = typer.Option("90d", help="Window: 30d | 90d | 180d | all"),
+    window: str = typer.Argument("90d", help="Window: 30d | 90d | 180d | all"),
 ) -> None:
     """Show recent form statistics for a team."""
+    # Allow numeric values like '90' as shorthand for '90d'
+    if window.isdigit():
+        window = f"{window}d"
     if window not in WINDOWS:
         raise typer.BadParameter(f"window must be one of: {', '.join(WINDOWS)}")
     create_tables()
@@ -201,14 +207,67 @@ def team_form(
         form = compute_team_form(session, team_row, window_days)
     typer.echo(json.dumps(form.__dict__, indent=2))
 
+
+@app.command("download-team-matches")
+def cli_download_team_matches(
+    team: str,
+    window: str = typer.Argument("90d", help="Window: 30d | 90d | 180d | all or number of days"),
+    max_matches: int | None = typer.Option(None, help="Maximum number of matches to download."),
+) -> None:
+    """Download recent HLTV match pages for a team into the raw data folder."""
+    # allow numeric shorthand
+    if window.isdigit():
+        window = f"{window}"
+
+    def progress(processed: int, total: int, downloaded: int) -> None:
+        percent = (processed / total * 100) if total else 0.0
+        print(
+            f"\rDownloading from {list_url}: "
+            f"{processed}/{total} checked, {downloaded} downloaded "
+            f"({percent:.0f}%)",
+            end="",
+            flush=True,
+        )
+
+    try:
+        list_url = _resolve_team_results_url(team, window)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        typer.echo("Fallback: use the HLTV team ID or a full HLTV team page URL.")
+        return
+
+    typer.echo(f"Downloading matches from {list_url}")
+    paths = download_team_matches(team, window=window, max_matches=max_matches, progress=progress)
+    print()
+    if not paths:
+        typer.echo("No matches downloaded.")
+        return
+    typer.echo(f"Downloaded {len(paths)} match HTML files:")
+    for p in paths:
+        typer.echo(f"  - {p}")
+
+
+@app.command("ingest-raw")
+def cli_ingest_raw(raw_dir: Path | None = typer.Option(None, help="Folder containing hltv_match_*.html files.")) -> None:
+    """Import downloaded raw HTML files into the database (parse → import)."""
+    result = run_sync(raw_dir=raw_dir)
+    typer.echo(result.summary())
+    if result.errors:
+        typer.echo("\nErrors encountered:")
+        for err in result.errors:
+            typer.echo(f"  • {err}")
+
     
 
 @app.command("player-form")
 def player_form(
     player: str,
-    window: str = typer.Option("90d", help="Window: 30d | 90d | 180d | all"),
+    window: str = typer.Argument("90d", help="Window: 30d | 90d | 180d | all"),
 ) -> None:
     """Show recent form statistics for a player."""
+    # Allow numeric values like '90' as shorthand for '90d'
+    if window.isdigit():
+        window = f"{window}d"
     if window not in WINDOWS:
         raise typer.BadParameter(f"window must be one of: {', '.join(WINDOWS)}")
     create_tables()
